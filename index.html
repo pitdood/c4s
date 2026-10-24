@@ -1,0 +1,589 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#1a1a2e">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<title>Connect Four Solver</title>
+<link rel="manifest" href="manifest.json">
+<style>
+/* ── reset / base ─────────────────────────────────────────────── */
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+:root {
+  --bg:        #1a1a2e;
+  --surface:   #16213e;
+  --card:      #0f3460;
+  --red:       #e94560;
+  --yellow:    #f5a623;
+  --empty:     #0d2137;
+  --emptybdr:  #1e3a5f;
+  --text:      #e0e0e0;
+  --muted:     #8892a4;
+  --accent:    #4fc3f7;
+  --win:       #66bb6a;
+  --draw:      #ffca28;
+  --loss:      #ef5350;
+  --radius:    12px;
+  --col-gap:   6px;
+}
+
+html, body {
+  height: 100%; background: var(--bg); color: var(--text);
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  font-size: 16px; line-height: 1.4; overflow-x: hidden;
+  -webkit-tap-highlight-color: transparent;
+}
+
+/* ── layout ───────────────────────────────────────────────────── */
+#app {
+  display: flex; flex-direction: column; min-height: 100%;
+  max-width: 520px; margin: 0 auto; padding: 12px 12px env(safe-area-inset-bottom);
+}
+
+header {
+  display: flex; align-items: center; gap: 10px;
+  padding: 4px 0 12px;
+}
+header h1 { font-size: 1.1rem; font-weight: 700; letter-spacing: .03em; }
+#size-select {
+  margin-left: auto; background: var(--card); color: var(--text);
+  border: none; border-radius: 8px; padding: 6px 10px; font-size: .85rem;
+  cursor: pointer;
+}
+
+/* ── board ────────────────────────────────────────────────────── */
+#board-wrap {
+  background: var(--surface); border-radius: var(--radius);
+  padding: 10px; position: relative; user-select: none;
+}
+
+#col-btns {
+  display: grid; gap: var(--col-gap); margin-bottom: 4px;
+}
+.col-btn {
+  background: transparent; border: none; cursor: pointer;
+  padding: 4px 0; border-radius: 6px; transition: background .15s;
+}
+.col-btn:active { background: rgba(79,195,247,.15); }
+.col-btn svg { width: 100%; height: 18px; fill: var(--accent); opacity: .7; }
+.col-btn.best svg { opacity: 1; fill: var(--win); }
+.col-btn.full { cursor: default; opacity: .3; }
+
+#board-grid {
+  display: grid; gap: var(--col-gap);
+}
+.cell {
+  aspect-ratio: 1; border-radius: 50%;
+  background: var(--empty); border: 2px solid var(--emptybdr);
+  position: relative; transition: background .12s;
+}
+.cell.red    { background: var(--red);    border-color: var(--red); }
+.cell.yellow { background: var(--yellow); border-color: var(--yellow); }
+.cell.last   { box-shadow: 0 0 0 3px white; }
+
+/* score overlay on cells */
+.cell-score {
+  position: absolute; inset: 0; display: flex;
+  align-items: center; justify-content: center;
+  font-size: .7rem; font-weight: 700;
+  border-radius: 50%; opacity: 0; transition: opacity .2s;
+  pointer-events: none;
+}
+.show-scores .cell-score { opacity: 1; }
+.cell-score.win  { background: rgba(102,187,106,.85); color: #000; }
+.cell-score.draw { background: rgba(255,202,40,.85);  color: #000; }
+.cell-score.loss { background: rgba(239,83,80,.85);   color: #fff; }
+
+#col-labels {
+  display: grid; gap: var(--col-gap); margin-top: 4px;
+}
+.col-label {
+  text-align: center; font-size: .7rem; color: var(--muted);
+}
+/* score label below each column */
+.col-score-lbl {
+  text-align: center; font-size: .75rem; font-weight: 700; min-height: 1.1em;
+}
+.col-score-lbl.win  { color: var(--win); }
+.col-score-lbl.draw { color: var(--draw); }
+.col-score-lbl.loss { color: var(--loss); }
+
+/* ── status bar ───────────────────────────────────────────────── */
+#status {
+  margin: 10px 0; min-height: 2.2em;
+  background: var(--surface); border-radius: var(--radius);
+  padding: 8px 14px; font-size: .88rem;
+  display: flex; align-items: center; gap: 8px;
+}
+#status-dot {
+  width: 10px; height: 10px; border-radius: 50%; flex-shrink: 0;
+  background: var(--muted);
+}
+#status-dot.red    { background: var(--red); }
+#status-dot.yellow { background: var(--yellow); }
+#status-dot.win    { background: var(--win); }
+#status-dot.solving { background: var(--accent);
+  animation: pulse 1s ease-in-out infinite; }
+@keyframes pulse { 0%,100%{opacity:1} 50%{opacity:.4} }
+
+#node-counter { margin-left: auto; font-size: .75rem; color: var(--muted); }
+
+/* ── buttons ──────────────────────────────────────────────────── */
+#btns {
+  display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-bottom: 8px;
+}
+.btn {
+  background: var(--card); border: none; border-radius: var(--radius);
+  color: var(--text); font-size: .9rem; font-weight: 600;
+  padding: 12px 8px; cursor: pointer; transition: opacity .15s, background .15s;
+  display: flex; align-items: center; justify-content: center; gap: 6px;
+}
+.btn:active { opacity: .75; }
+.btn:disabled { opacity: .35; cursor: default; }
+.btn.primary { background: var(--accent); color: #000; }
+.btn.danger  { background: #c62828; }
+
+#btn-cancel { display: none; }
+
+/* ── book / settings row ──────────────────────────────────────── */
+#settings-row {
+  display: flex; align-items: center; gap: 10px;
+  background: var(--surface); border-radius: var(--radius);
+  padding: 8px 14px; font-size: .82rem; margin-bottom: 8px;
+}
+#settings-row label { display: flex; align-items: center; gap: 6px; cursor: pointer; }
+input[type=checkbox] { width: 16px; height: 16px; cursor: pointer; accent-color: var(--accent); }
+#book-info { margin-left: auto; color: var(--muted); font-size: .75rem; }
+
+/* ── history ──────────────────────────────────────────────────── */
+#history-wrap {
+  background: var(--surface); border-radius: var(--radius);
+  padding: 8px 14px; font-size: .8rem; color: var(--muted);
+  word-break: break-all;
+}
+#history-wrap span { color: var(--text); }
+</style>
+</head>
+<body>
+<div id="app">
+  <header>
+    <h1>Connect Four Solver</h1>
+    <select id="size-select">
+      <option value="8x9">8 × 9</option>
+      <option value="9x8">9 × 8</option>
+      <option value="9x9" selected>9 × 9</option>
+      <option value="10x10">10 × 10</option>
+    </select>
+  </header>
+
+  <div id="board-wrap">
+    <div id="col-btns"></div>
+    <div id="board-grid"></div>
+    <div id="col-labels"></div>
+    <div id="col-scores"></div>
+  </div>
+
+  <div id="status">
+    <div id="status-dot" class="red"></div>
+    <span id="status-text">Red to play  (tap a column)</span>
+    <span id="node-counter"></span>
+  </div>
+
+  <div id="btns">
+    <button class="btn primary" id="btn-score">⚡ Score moves</button>
+    <button class="btn"         id="btn-suggest">💡 Suggest</button>
+    <button class="btn"         id="btn-undo">↩ Undo</button>
+    <button class="btn danger"  id="btn-new">✕ New game</button>
+    <button class="btn danger"  id="btn-cancel" style="grid-column:1/-1">✕ Cancel</button>
+  </div>
+
+  <div id="settings-row">
+    <label><input type="checkbox" id="chk-book"> Opening book (save positions)</label>
+    <span id="book-info"></span>
+  </div>
+
+  <div id="history-wrap">
+    Moves: <span id="history">—</span>
+  </div>
+</div>
+
+<script>
+'use strict';
+
+// ── State ─────────────────────────────────────────────────────────────────────
+let W = 9, H = 9;
+let moveHistory = [];         // column indices played so far
+let lastScores  = null;       // { col: score } from last score_moves
+let solving     = false;
+let worker      = null;
+let bookEnabled = false;
+
+// ── DOM refs ──────────────────────────────────────────────────────────────────
+const boardGrid   = document.getElementById('board-grid');
+const colBtns     = document.getElementById('col-btns');
+const colLabels   = document.getElementById('col-labels');
+const colScores   = document.getElementById('col-scores');
+const statusDot   = document.getElementById('status-dot');
+const statusText  = document.getElementById('status-text');
+const nodeCounter = document.getElementById('node-counter');
+const historyEl   = document.getElementById('history');
+const boardWrap   = document.getElementById('board-wrap');
+
+// ── Worker management ─────────────────────────────────────────────────────────
+function spawnWorker() {
+  if (worker) { worker.terminate(); worker = null; }
+  worker = new Worker('solver-worker.js');
+  worker.onmessage = handleWorkerMsg;
+  worker.onerror   = e => setStatus(`Worker error: ${e.message}`, 'muted');
+  worker.postMessage({ cmd: 'init', W, H,
+    bookEnabled, bookMaxMoves: 30, ttBits: 21 });
+}
+
+function handleWorkerMsg(e) {
+  const d = e.data;
+  if (d.type === 'ready') {
+    const n = d.bookSize;
+    document.getElementById('book-info').textContent =
+      n ? `${n.toLocaleString()} cached` : '';
+    return;
+  }
+  if (d.type === 'progress') {
+    nodeCounter.textContent = `${(d.nodes/1000).toFixed(0)}k nodes`;
+    return;
+  }
+  if (d.type === 'cancelled') {
+    endSolving();
+    setStatus(turnLabel(), turnDot());
+    return;
+  }
+  if (d.type === 'error') {
+    endSolving(); setStatus('Error: ' + d.msg, 'muted'); return;
+  }
+
+  const ns   = d.nodes;
+  const ms   = d.ms;
+  const stat = `${(ns/1000).toFixed(0)}k nodes · ${(ms/1000).toFixed(2)}s`;
+
+  if (d.type === 'score_moves') {
+    lastScores = d.scores;
+    renderScores(d.scores);
+    const best = Math.max(...Object.values(d.scores));
+    const tag  = best > 0 ? 'Win guaranteed' : best === 0 ? 'Draw with best play' : 'Loss with best play';
+    const cls  = best > 0 ? 'win' : best === 0 ? 'draw' : 'loss';
+    setStatus(`${tag}  · ${stat}`, cls);
+  } else if (d.type === 'suggest') {
+    highlightSuggested(d.col, d.score);
+    const tag = d.score > 0 ? `Win: play col ${d.col}` :
+                d.score === 0 ? `Draw: play col ${d.col}` :
+                                `Best: col ${d.col} (still losing)`;
+    setStatus(`${tag}  · ${stat}`, d.score > 0 ? 'win' : d.score === 0 ? 'draw' : 'loss');
+  }
+
+  endSolving();
+  updateBookInfo();
+}
+
+// ── Board rendering ───────────────────────────────────────────────────────────
+function buildGrid() {
+  boardGrid.style.gridTemplateColumns = `repeat(${W}, 1fr)`;
+  colBtns.style.gridTemplateColumns   = `repeat(${W}, 1fr)`;
+  colLabels.style.gridTemplateColumns = `repeat(${W}, 1fr)`;
+  colScores.style.gridTemplateColumns = `repeat(${W}, 1fr)`;
+  colScores.style.display = 'grid';
+  colScores.style.gap = 'var(--col-gap)';
+  colScores.style.marginTop = '4px';
+
+  boardGrid.innerHTML = '';
+  colBtns.innerHTML   = '';
+  colLabels.innerHTML = '';
+  colScores.innerHTML = '';
+
+  for (let c = 0; c < W; c++) {
+    // column drop button
+    const btn = document.createElement('button');
+    btn.className = 'col-btn';
+    btn.dataset.col = c;
+    btn.innerHTML = `<svg viewBox="0 0 24 24"><path d="M12 20l-8-8h5V4h6v8h5z"/></svg>`;
+    btn.addEventListener('click', () => playCol(c));
+    colBtns.appendChild(btn);
+
+    // column index label
+    const lbl = document.createElement('div');
+    lbl.className = 'col-label';
+    lbl.textContent = c;
+    colLabels.appendChild(lbl);
+
+    // score label below column
+    const sl = document.createElement('div');
+    sl.className = 'col-score-lbl';
+    sl.id = `cscore-${c}`;
+    colScores.appendChild(sl);
+  }
+
+  for (let r = H - 1; r >= 0; r--) {
+    for (let c = 0; c < W; c++) {
+      const cell = document.createElement('div');
+      cell.className = 'cell';
+      cell.id = `cell-${c}-${r}`;
+      boardGrid.appendChild(cell);
+    }
+  }
+}
+
+// Compute board state from move history
+function computeBoard() {
+  const heights = new Array(W).fill(0);
+  const pieces  = {};   // `${c},${r}` → 'red'|'yellow'
+  let last = null;
+  for (let i = 0; i < moveHistory.length; i++) {
+    const c   = moveHistory[i];
+    const r   = heights[c]++;
+    const clr = i % 2 === 0 ? 'red' : 'yellow';
+    pieces[`${c},${r}`] = clr;
+    last = { c, r };
+  }
+  return { heights, pieces, last };
+}
+
+function renderBoard() {
+  const { heights, pieces, last } = computeBoard();
+
+  // Update cells
+  for (let c = 0; c < W; c++) {
+    for (let r = 0; r < H; r++) {
+      const cell = document.getElementById(`cell-${c}-${r}`);
+      const clr  = pieces[`${c},${r}`];
+      cell.className = 'cell' + (clr ? ` ${clr}` : '') +
+                       (last && last.c === c && last.r === r ? ' last' : '');
+      // Keep score overlay
+      const sc = cell.querySelector('.cell-score');
+      if (sc) cell.removeChild(sc);
+    }
+    // Update drop button full state
+    const btn = colBtns.children[c];
+    btn.classList.toggle('full', heights[c] >= H);
+  }
+
+  // Clear score labels
+  clearScores();
+  lastScores = null;
+
+  // Update history display
+  historyEl.textContent = moveHistory.length ? moveHistory.join(' ') : '—';
+
+  // Update status
+  const moves = moveHistory.length;
+  if (isGameOver()) {
+    // already handled in playCol / newGame
+  } else {
+    setStatus(turnLabel(), turnDot());
+    nodeCounter.textContent = '';
+  }
+}
+
+function clearScores() {
+  boardWrap.classList.remove('show-scores');
+  for (let c = 0; c < W; c++) {
+    const sl = document.getElementById(`cscore-${c}`);
+    if (sl) { sl.textContent = ''; sl.className = 'col-score-lbl'; }
+  }
+}
+
+function renderScores(scores) {
+  clearScores();
+  const best = Math.max(...Object.values(scores));
+
+  for (const [c, s] of Object.entries(scores)) {
+    const sl  = document.getElementById(`cscore-${+c}`);
+    if (!sl) continue;
+    const cls = s > 0 ? 'win' : s === 0 ? 'draw' : 'loss';
+    sl.textContent  = s > 0 ? `+${s}` : String(s);
+    sl.className    = `col-score-lbl ${cls}`;
+
+    // Arrow button highlight
+    const btn = colBtns.children[+c];
+    btn.classList.toggle('best', s === best && +c in scores);
+
+    // Cell overlay on top row cell
+    const { heights } = computeBoard();
+    const r = heights[+c];    // next empty row
+    if (r < H) {
+      const cell = document.getElementById(`cell-${+c}-${r}`);
+      const ov   = document.createElement('div');
+      ov.className = `cell-score ${cls}`;
+      ov.textContent = s > 0 ? `+${s}` : String(s);
+      cell.appendChild(ov);
+    }
+  }
+  boardWrap.classList.add('show-scores');
+}
+
+function highlightSuggested(col, score) {
+  // Dim all arrows, highlight suggested
+  for (let c = 0; c < W; c++) {
+    const btn = colBtns.children[c];
+    btn.classList.toggle('best', c === col);
+  }
+  const sl  = document.getElementById(`cscore-${col}`);
+  if (sl) {
+    const cls = score > 0 ? 'win' : score === 0 ? 'draw' : 'loss';
+    sl.textContent = score > 0 ? `+${score}` : String(score);
+    sl.className   = `col-score-lbl ${cls}`;
+  }
+}
+
+// ── Game logic ────────────────────────────────────────────────────────────────
+function columnHeight(c) {
+  return moveHistory.filter(m => m === c).length;
+}
+
+function isGameOver() {
+  if (moveHistory.length === W * H) return true;
+  // Check if last mover won: recompute & use the Python-equivalent _align4
+  // We'll do this in pure JS to avoid round-tripping the worker
+  if (moveHistory.length === 0) return false;
+  const { pieces } = computeBoard();
+  const lastMover  = (moveHistory.length - 1) % 2 === 0 ? 'red' : 'yellow';
+  return checkWin(pieces, lastMover);
+}
+
+function checkWin(pieces, color) {
+  const dirs = [[1,0],[0,1],[1,1],[1,-1]];
+  for (let c = 0; c < W; c++) {
+    for (let r = 0; r < H; r++) {
+      if (pieces[`${c},${r}`] !== color) continue;
+      for (const [dc, dr] of dirs) {
+        let n = 1;
+        while (pieces[`${c+n*dc},${r+n*dr}`] === color) n++;
+        if (n >= 4) return true;
+      }
+    }
+  }
+  return false;
+}
+
+function turnLabel() {
+  const t = moveHistory.length % 2 === 0 ? 'Red' : 'Yellow';
+  return `${t} to play  (tap a column)`;
+}
+function turnDot()   { return moveHistory.length % 2 === 0 ? 'red' : 'yellow'; }
+
+function playCol(c) {
+  if (solving) return;
+  if (columnHeight(c) >= H) return;
+  if (isGameOver()) return;
+
+  moveHistory.push(c);
+  renderBoard();
+  clearScores();
+
+  if (checkWin(computeBoard().pieces, (moveHistory.length - 1) % 2 === 0 ? 'red' : 'yellow')) {
+    const winner = (moveHistory.length - 1) % 2 === 0 ? 'Red' : 'Yellow';
+    setStatus(`🎉 ${winner} wins!`, 'win');
+    return;
+  }
+  if (moveHistory.length === W * H) {
+    setStatus('Draw — board full!', 'draw');
+    return;
+  }
+}
+
+// ── UI helpers ────────────────────────────────────────────────────────────────
+function setStatus(msg, dotClass = '') {
+  statusText.textContent = msg;
+  statusDot.className    = dotClass ? `${dotClass}` : '';
+  statusDot.id           = 'status-dot';
+}
+
+function startSolving(label) {
+  solving = true;
+  setStatus(label, 'solving');
+  nodeCounter.textContent = '';
+  document.getElementById('btn-score').disabled   = true;
+  document.getElementById('btn-suggest').disabled = true;
+  document.getElementById('btn-undo').disabled    = true;
+  document.getElementById('btn-cancel').style.display = 'block';
+  document.getElementById('btn-new').style.display    = 'none';
+}
+
+function endSolving() {
+  solving = false;
+  document.getElementById('btn-score').disabled   = false;
+  document.getElementById('btn-suggest').disabled = false;
+  document.getElementById('btn-undo').disabled    = false;
+  document.getElementById('btn-cancel').style.display = 'none';
+  document.getElementById('btn-new').style.display    = '';
+}
+
+async function updateBookInfo() {
+  if (!worker) return;
+  // We don't have a direct IPC for book size here; re-init to get it
+  // (size updates happen on next init)
+}
+
+// ── Button handlers ───────────────────────────────────────────────────────────
+document.getElementById('btn-score').addEventListener('click', () => {
+  if (solving || isGameOver()) return;
+  startSolving('Solving…');
+  worker.postMessage({ cmd: 'score_moves', moves: [...moveHistory], W, H,
+    bookEnabled, bookMaxMoves: 30 });
+});
+
+document.getElementById('btn-suggest').addEventListener('click', () => {
+  if (solving || isGameOver()) return;
+  startSolving('Thinking…');
+  worker.postMessage({ cmd: 'suggest', moves: [...moveHistory], W, H,
+    bookEnabled, bookMaxMoves: 30 });
+});
+
+document.getElementById('btn-undo').addEventListener('click', () => {
+  if (solving || moveHistory.length === 0) return;
+  moveHistory.pop();
+  renderBoard();
+  clearScores();
+  setStatus(turnLabel(), turnDot());
+});
+
+document.getElementById('btn-new').addEventListener('click', () => {
+  if (solving) return;
+  moveHistory = [];
+  renderBoard();
+  setStatus(turnLabel(), turnDot());
+});
+
+document.getElementById('btn-cancel').addEventListener('click', () => {
+  if (!solving) return;
+  worker.postMessage({ cmd: 'cancel' });
+});
+
+document.getElementById('size-select').addEventListener('change', function() {
+  const [nw, nh] = this.value.split('x').map(Number);
+  W = nw; H = nh;
+  moveHistory = [];
+  lastScores  = null;
+  buildGrid();
+  renderBoard();
+  spawnWorker();
+  setStatus(turnLabel(), turnDot());
+});
+
+document.getElementById('chk-book').addEventListener('change', function() {
+  bookEnabled = this.checked;
+  spawnWorker();   // re-init worker with/without book
+});
+
+// ── Init ───────────────────────────────────────────────────────────────────────
+buildGrid();
+renderBoard();
+spawnWorker();
+
+// Service worker registration
+if ('serviceWorker' in navigator) {
+  navigator.serviceWorker.register('sw.js').catch(() => {});
+}
+</script>
+</body>
+</html>
